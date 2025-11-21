@@ -57,8 +57,7 @@ class DynaMixForecaster:
         """            
         
         # Get the dtype from model parameters
-        model_dtype = next(self.model.parameters()).dtype
-            
+        model_dtype = next(self.model.parameters()).dtype           
         
         # Convert to torch tensor if needed
         if not isinstance(context, torch.Tensor):
@@ -70,8 +69,7 @@ class DynaMixForecaster:
             initial_x = torch.tensor(initial_x, dtype=model_dtype, device=device)
         elif initial_x is not None and (initial_x.device != device or initial_x.dtype != model_dtype):
             initial_x = initial_x.to(device=device, dtype=model_dtype)
-        
-        
+            
         # Check data dimensions and reshape if needed
         original_dim = context.dim()
         if original_dim == 2:
@@ -83,37 +81,33 @@ class DynaMixForecaster:
             if initial_x.shape[1] != context.shape[2]:
                 raise ValueError(f"Initial condition has {initial_x.shape[1]} features, but context has {context.shape[2]} features")
         
-        
         # Data shape
         seq_length, batch_size, feature_dim = context.shape
-        
         
         # Check if reshaping is needed for model dimension
         if feature_dim <= self.model.N:
             return context, initial_x, (batch_size, feature_dim, False, None, None, original_dim)
-            
+
+
+        # Case: feature_dim > self.model.N            
         print(f"Warning: Input feature dimension {feature_dim} exceeds model dimension {self.model.N}. "
               f"This may lead to performance degradation."
               f"Reshaping data to treat each feature as separate time series.")
         
-        
         # Store original dimensions for reshaping back later
         original_batch_size = batch_size
         original_feature_dim = feature_dim
-        
         
         # Reshape context to (seq_length, batch_size * feature_dim, 1)
         transposed = context.permute(0, 2, 1)
         new_batch_size = batch_size * feature_dim
         reshaped_context = transposed.reshape(seq_length, new_batch_size, 1)
         
-        
         # Similarly reshape initial_x if provided
         reshaped_initial_x = initial_x
         if initial_x is not None:
             # Reshape from (batch_size, feature_dim) to (batch_size * feature_dim, 1)
-            reshaped_initial_x = initial_x.transpose(0, 1).reshape(new_batch_size, 1)
-        
+            reshaped_initial_x = initial_x.transpose(0, 1).reshape(new_batch_size, 1)        
         
         return reshaped_context, reshaped_initial_x, (new_batch_size, 1, True, original_batch_size, original_feature_dim, original_dim)
     
@@ -226,6 +220,84 @@ class DynaMixForecaster:
         output = preprocessor.postprocess(output)
         
         
+        # Step 6: Reshape back to original dimensions if needed
+        output = self._reshape_to_original(output, shape_metadata)
+        
+        
+        return output
+
+
+
+    @torch.no_grad()
+    def forecast_w_uncertainty(self, context, horizon, num_samples, preprocessing_method="pos_embedding", 
+                standardize=True, fit_nonstationary=False, initial_x=None):
+        """
+        Efficient batched forecasting with the DynaMix model.
+        
+        This method implements a complete forecasting pipeline including:
+        - Data preprocessing (Box-Cox, detrending, standardization)
+        - Embedding techniques for dimensionality matching
+        - DynaMix model prediction
+        - Data postprocessing (inverse transformations)
+        
+        Args:
+            context: Context data tensor of shape (seq_length, batch_size, feature_dim) or (seq_length, feature_dim)
+            horizon: Forecast horizon (number of steps to predict)
+            preprocessing_method: Data preprocessing method ('pos_embedding', 'zero_embedding',
+                                  'delay_embedding', or 'delay_embedding_random') (default: 'pos_embedding')
+            standardize: Whether to standardize the data (default: True)
+            fit_nonstationary: Whether to fit a non-stationary time series (default: False)
+            initial_x: Optional initial condition of shape (batch_size, feature_dim) or (feature_dim,)
+            
+        Returns:
+            Predicted sequence of shape (horizon, batch_size, feature_dim)
+        """
+        
+        # Get model dimensions
+        M = self.model.M
+        N = self.model.N
+        device = context.device if isinstance(context, torch.Tensor) else self.model.B.device
+        model_dtype = next(self.model.parameters()).dtype     
+        
+        # Apply context reshaping if needed
+        context, initial_x, shape_metadata = self._reshape_for_model(context, initial_x, device)
+
+        # Create a batch of num_samples out of the context data
+        if shape_metadata[0] > 1:   # check if batch_size > 1
+            raise ValueError(f"forecast_with_uncertainty() only works for len(context.size()) == 2 (i.e. no batches).")
+        shape_metadata = tuple([num_samples, *shape_metadata[1:]])   # changing batch_size from 1 to num_samples
+        context = context.repeat(1, shape_metadata[0], 1)
+         
+        # Create data preprocessor
+        preprocessor = DataPreprocessor(
+            standardize=standardize,
+            box_cox=fit_nonstationary,
+            detrending=fit_nonstationary,
+            preprocessing_method=preprocessing_method
+        )
+
+        
+        # Step 1: Apply preprocessing pipeline
+        context_embedded, initial_condition = preprocessor.preprocess(context, self.model.N, initial_x)
+                
+        # Step 2: Initialize latent state
+        z = self._init_latent_state(initial_condition)   # (feature_dim, batch_size)
+           
+        # Step 3: Perform forecasting loop with uncertainty sampling
+        Z_gen = torch.empty(horizon, M, shape_metadata[0], device=device, dtype=model_dtype)
+        with torch.amp.autocast(device_type='cuda' if device.type == 'cuda' else 'cpu', enabled=device.type == 'cuda'):
+            precomputed_cnn = self.model.precompute_cnn(context_embedded)
+            for t in range(horizon):
+                z = torch.quantile(z, 0.5, dim=1, keepdim=True).repeat(1, shape_metadata[0])   # input of each step is median of prev. output batch
+                z = self.model(z, context_embedded, precomputed_cnn=precomputed_cnn) 
+                Z_gen[t] = z
+   
+        # Step 4: Apply observation generation
+        output = Z_gen[:, :shape_metadata[1], :].permute(0, 2, 1)  # (horizon, batch_size, feature_dim)
+          
+        # Step 5: Apply inverse data transformations (e.g. standardization, ...)
+        output = preprocessor.postprocess(output)
+                
         # Step 6: Reshape back to original dimensions if needed
         output = self._reshape_to_original(output, shape_metadata)
         

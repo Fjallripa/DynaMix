@@ -6,6 +6,8 @@ from mpl_toolkits.mplot3d import Axes3D
 import scipy.ndimage as ndimage
 from ..metrics.metrics import compute_and_smooth_power_spectrum
 
+
+
 def plot_3D_attractor(context, prediction, ground_truth=None, lim_gen=2000, lim_pse=500, smoothing_sigma=2.0):
     """
     Plot 3D attractor with time series and power spectrum
@@ -141,6 +143,8 @@ def plot_3D_attractor(context, prediction, ground_truth=None, lim_gen=2000, lim_
     plt.tight_layout()
     return fig
 
+
+
 def plot_TS_forecast(context, prediction, ground_truth=None, lim=1000):
     """
     Plot time series forecast with context
@@ -209,6 +213,8 @@ def plot_TS_forecast(context, prediction, ground_truth=None, lim=1000):
     plt.tight_layout()
     
     return fig
+
+
 
 def plot_2D_attractor(context, prediction):
     """
