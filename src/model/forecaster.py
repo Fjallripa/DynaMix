@@ -1,5 +1,6 @@
 import torch
 import torch.nn.functional as F
+from tqdm import tqdm
 from .preprocessing import DataPreprocessor
 
 
@@ -287,7 +288,7 @@ class DynaMixForecaster:
         Z_gen = torch.empty(horizon, M, shape_metadata[0], device=device, dtype=model_dtype)
         with torch.amp.autocast(device_type='cuda' if device.type == 'cuda' else 'cpu', enabled=device.type == 'cuda'):
             precomputed_cnn = self.model.precompute_cnn(context_embedded)
-            for t in range(horizon):
+            for t in tqdm(range(horizon)):
                 z = torch.quantile(z, 0.5, dim=1, keepdim=True).repeat(1, shape_metadata[0])   # input of each step is median of prev. output batch
                 z = self.model(z, context_embedded, precomputed_cnn=precomputed_cnn) 
                 Z_gen[t] = z
