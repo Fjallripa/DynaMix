@@ -230,8 +230,9 @@ class DynaMixForecaster:
 
 
     @torch.no_grad()
-    def forecast_w_uncertainty(self, context, horizon, num_samples, preprocessing_method="pos_embedding", 
-                standardize=True, fit_nonstationary=False, initial_x=None):
+    def forecast_w_uncertainty(self, context, horizon, num_samples, ensemble_forecast_length=1, attention_noise=True,
+        preprocessing_method="pos_embedding", standardize=True, fit_nonstationary=False, initial_x=None
+    ):
         """
         Efficient batched forecasting with the DynaMix model.
         
@@ -289,9 +290,20 @@ class DynaMixForecaster:
         with torch.amp.autocast(device_type='cuda' if device.type == 'cuda' else 'cpu', enabled=device.type == 'cuda'):
             precomputed_cnn = self.model.precompute_cnn(context_embedded)
             for t in tqdm(range(horizon)):
+                #z = z[:,0:1].repeat(1, shape_metadata[0])   # input of each step is first of prev. output batch
                 z = torch.quantile(z, 0.5, dim=1, keepdim=True).repeat(1, shape_metadata[0])   # input of each step is median of prev. output batch
-                z = self.model(z, context_embedded, precomputed_cnn=precomputed_cnn) 
-                Z_gen[t] = z
+
+                # forecast next step
+                z = self.model(z, context_embedded, 
+                               precomputed_cnn=precomputed_cnn, 
+                               attention_noise=attention_noise)
+
+                # log observations
+                predicted_batch = z
+                if ensemble_forecast_length > 1:
+                    for i in range(ensemble_forecast_length-1):
+                        predicted_batch = self.model(predicted_batch, context_embedded, precomputed_cnn=precomputed_cnn)
+                Z_gen[t] = predicted_batch
    
         # Step 4: Apply observation generation
         output = Z_gen[:, :shape_metadata[1], :].permute(0, 2, 1)  # (horizon, batch_size, feature_dim)

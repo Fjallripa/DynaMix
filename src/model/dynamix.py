@@ -17,7 +17,7 @@ class GatingNetwork(nn.Module):
         self.softmax_temp2 = nn.Parameter(torch.tensor([0.1], dtype=dtype))
         self.sigma = nn.Parameter(torch.ones(N, dtype=dtype) * 0.05, requires_grad=True)
 
-    def forward(self, context, z, precomputed_cnn=None):
+    def forward(self, context, z, precomputed_cnn=None, attention_noise=True):
         # context: (seq_length, batch_size, N)
         # z: (M, batch_size)
         # precomputed_cnn: Optional precomputed CNN features for inference (seq_length-1, batch_size, N)
@@ -27,7 +27,7 @@ class GatingNetwork(nn.Module):
         
         # Compute attention weights
         z_obs = self.D @ z.detach()
-        z_current = z_obs + self.sigma.unsqueeze(1) * torch.randn(N, batch_size, dtype=z.dtype, device=z.device)
+        z_current = z_obs + attention_noise * self.sigma.unsqueeze(1) * torch.randn(N, batch_size, dtype=z.dtype, device=z.device)
         
         z_current_t = z_current.transpose(0, 1)
         context_frames = context[:-1]
@@ -185,13 +185,13 @@ class DynaMix(nn.Module):
         self.hidden_dim = hidden_dim
         self.M = M
 
-    def step(self, z, context, precomputed_cnn=None):
+    def step(self, z, context, precomputed_cnn=None, attention_noise=True):
         # z: (M, batch_size)
         # context: (seq_length, batch_size, N)
         # precomputed_cnn: Optional precomputed CNN features
 
         # Compute expert weights
-        w_exp = self.gating_network(context, z, precomputed_cnn=precomputed_cnn)  # (Experts, batch_size)
+        w_exp = self.gating_network(context, z, precomputed_cnn=precomputed_cnn, attention_noise=attention_noise)  # (Experts, batch_size)
         results = []
         
         # Compute expert outputs
@@ -202,7 +202,7 @@ class DynaMix(nn.Module):
         # Combine expert outputs
         return torch.sum(torch.stack(results, dim=0), dim=0)
 
-    def forward(self, z, context, precomputed_cnn=None):
+    def forward(self, z, context, precomputed_cnn=None, attention_noise=True):
         """
         Forward pass through the DynaMix model.
         
@@ -214,7 +214,7 @@ class DynaMix(nn.Module):
         Returns:
             Updated latent state
         """
-        return self.step(z, context, precomputed_cnn=precomputed_cnn)
+        return self.step(z, context, precomputed_cnn=precomputed_cnn, attention_noise=attention_noise)
         
     def precompute_cnn(self, context):
         """
