@@ -147,7 +147,7 @@ from src.metrics.metrics import geometrical_misalignment, temporal_misalignment,
 dstsp = geometrical_misalignment(reconstruction_tensor, ground_truth_tensor, n_bins=30)
 dh = temporal_misalignment(reconstruction_tensor, ground_truth_tensor, smoothing=20)
 pe = MASE(ground_truth_tensor, reconstruction_tensor, steps=10)
-```
+``` 
 
 ## Training the Model
 

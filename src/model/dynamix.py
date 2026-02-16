@@ -26,8 +26,9 @@ class GatingNetwork(nn.Module):
         M = z.shape[0]
         
         # Compute attention weights
-        z_obs = self.D @ z.detach()
-        z_current = z_obs + attention_noise * self.sigma.unsqueeze(1) * torch.randn(N, batch_size, dtype=z.dtype, device=z.device)
+        z_current = self.D @ z.detach()
+        if attention_noise:
+            z_current += self.sigma.unsqueeze(1) * torch.randn(N, batch_size, dtype=z.dtype, device=z.device)
         
         z_current_t = z_current.transpose(0, 1)
         context_frames = context[:-1]
