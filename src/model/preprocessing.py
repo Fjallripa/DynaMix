@@ -4,10 +4,14 @@ from .preprocessing_utilities import (TimeSeriesProcessor, Embedding,
                                     BoxCoxTransformer, Detrending, estimate_initial_condition)
 
 
+
+
 class DataPreprocessor:
     """
     Main class for data preprocessing that orchestrates all transformations.
     """
+    
+    
     def __init__(self, standardize=True, box_cox=False, detrending=False, preprocessing_method="pos_embedding"):
         """
         Initialize the data preprocessor.
@@ -19,6 +23,7 @@ class DataPreprocessor:
             preprocessing_method: Method for embedding ('pos_embedding', 'zero_embedding', 
                                   'delay_embedding', 'delay_embedding_random')
         """
+        
         self.standardize = standardize
         self.box_cox = box_cox
         self.detrending = detrending
@@ -36,6 +41,7 @@ class DataPreprocessor:
         self.original_context = None
         self.batch_size = None
         self.feature_dim = None
+
         
     
     def _apply_transformations(self, context):
@@ -48,6 +54,7 @@ class DataPreprocessor:
         Returns:
             Transformed context data
         """
+        
         # Store original context for inverse transformations
         self.original_context = context.clone()
 
@@ -84,6 +91,8 @@ class DataPreprocessor:
             context = detrended_context
             
         return context
+
+
     
     def _apply_transformations_inverse(self, output):
         """
@@ -115,6 +124,8 @@ class DataPreprocessor:
             output = output * self.transformation_std.unsqueeze(0) + self.transformation_mean.unsqueeze(0)
                 
         return output
+
+
     
     def _standardize_data(self, context):
         """
@@ -127,6 +138,7 @@ class DataPreprocessor:
         Returns:
             Standardized context and initial_x (if provided)
         """
+        
         if not self.standardize:
             return context
             
@@ -139,6 +151,8 @@ class DataPreprocessor:
         context = (context - self.context_mean.unsqueeze(0)) / self.context_std.unsqueeze(0)
         
         return context
+
+
     
     def _unstandardize_data(self, output):
         """
@@ -150,10 +164,13 @@ class DataPreprocessor:
         Returns:
             Output with standardization reversed
         """
+        
         if self.standardize and self.context_mean is not None and self.context_std is not None:
             return output * self.context_std.unsqueeze(0) + self.context_mean.unsqueeze(0)
         return output
-    
+
+
+        
     def _apply_embedding(self, context, model_dim):
         """
         Apply data preprocessing to each batch to reach model dimension.
@@ -165,6 +182,7 @@ class DataPreprocessor:
         Returns:
             Preprocessed context data tensor
         """
+        
         context_embedded_batch = []
         
         for b in range(self.batch_size):
@@ -179,7 +197,9 @@ class DataPreprocessor:
         
         # Stack along batch dimension
         return torch.stack(context_embedded_batch, dim=1)
-    
+
+
+        
     def _prepare_initial_condition(self, context_embedded, initial_x, model_dim):
         """
         Prepare initial condition for forecasting.
@@ -195,6 +215,7 @@ class DataPreprocessor:
         Raises:
             ValueError: If initial condition is provided with Box-Cox or detrending enabled
         """
+        
         if initial_x is None:
             # Use last context value for each batch
             return context_embedded[-1]
@@ -226,6 +247,8 @@ class DataPreprocessor:
             initial_x_processed[b] = batch_initial
 
         return initial_x_processed
+
+
     
     def preprocess(self, context, model_dim, initial_x=None):
         """
@@ -239,6 +262,7 @@ class DataPreprocessor:
         Returns:
             Preprocessed context data and initial condition
         """
+        
         # Store dimensions
         self.batch_size = context.shape[1]
         self.feature_dim = context.shape[2]
@@ -256,6 +280,8 @@ class DataPreprocessor:
         initial_condition = self._prepare_initial_condition(context_embedded, initial_x, model_dim)
         
         return context_embedded, initial_condition
+
+
     
     def postprocess(self, output):
         """
@@ -267,6 +293,7 @@ class DataPreprocessor:
         Returns:
             Output with inverse transformations applied
         """
+        
         # Undo standardization
         output = self._unstandardize_data(output)
         

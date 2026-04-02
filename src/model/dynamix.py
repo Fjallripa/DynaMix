@@ -17,6 +17,8 @@ class GatingNetwork(nn.Module):
         self.softmax_temp2 = nn.Parameter(torch.tensor([0.1], dtype=dtype))
         self.sigma = nn.Parameter(torch.ones(N, dtype=dtype) * 0.05, requires_grad=True)
 
+
+    
     def forward(self, context, z, precomputed_cnn=None, attention_noise=True):
         # context: (seq_length, batch_size, N)
         # z: (M, batch_size)
@@ -27,7 +29,9 @@ class GatingNetwork(nn.Module):
         
         # Compute attention weights
         z_current = self.D @ z.detach()
-        if attention_noise:
+        if type(attention_noise)==torch.Tensor:
+            z_current += self.sigma.unsqueeze(1) * attention_noise
+        elif attention_noise:
             z_current += self.sigma.unsqueeze(1) * torch.randn(N, batch_size, dtype=z.dtype, device=z.device)
         
         z_current_t = z_current.transpose(0, 1)
@@ -56,12 +60,18 @@ class GatingNetwork(nn.Module):
         mlp_output = self.mlp_layer2(F.relu(self.mlp_layer1(combined_t)))
         w_exp = F.softmax(-mlp_output.transpose(0, 1) / torch.abs(self.softmax_temp2[0]), dim=0)
         return w_exp
+
+
     
     def gaussian_init(self, M, N, dtype=torch.float32):
         return torch.randn(M, N, dtype=dtype) * 0.01
 
+
+
+    
 class ExpertNetwork(nn.Module):
     """Base class for different expert architectures."""
+    
     def __init__(self, M, P=0, probabilistic=False, dtype=torch.float32):
         super().__init__()
         self.M = M
@@ -72,9 +82,13 @@ class ExpertNetwork(nn.Module):
         # Parameter for probabilistic experts
         if probabilistic:
             self.sigma = nn.Parameter(torch.ones(1, dtype=dtype) * 0.05, requires_grad=True)
+
+
     
     def forward(self, z):
         raise NotImplementedError("Subclasses must implement forward method")
+
+
     
     def add_noise(self, z):
         """Add stochasticity to the latent state if in probabilistic mode.
@@ -87,21 +101,32 @@ class ExpertNetwork(nn.Module):
             noise = torch.randn(self.M, batch_size, dtype=z.dtype, device=z.device)
             return z + self.sigma * noise
         return z
+
+
     
     def gaussian_init(self, M, N):
         return torch.randn(M, N, dtype=self.dtype) * 0.01
-    
+
+
+        
     def normalized_positive_definite(self, M):
         R = np.random.randn(M, M).astype(np.float32)
         K = R.T @ R / M + np.eye(M)
         lambd = np.max(np.abs(np.linalg.eigvals(K)))
         return K / lambd
 
+
+
+
+
 class AlmostLinearRNN(ExpertNetwork):
     """Almost linear RNN expert architecture."""
+    
     def __init__(self, M, P, probabilistic=False, dtype=torch.float32):
         super().__init__(M, P, probabilistic, dtype=dtype)
         self.A, self.W, self.h = self.initialize_A_W_h(M)
+
+
         
     def forward(self, z):
         # z: (M, batch_size)
@@ -117,6 +142,8 @@ class AlmostLinearRNN(ExpertNetwork):
             output = self.add_noise(output)
             
         return output
+
+
     
     def initialize_A_W_h(self, M):
         A = torch.nn.Parameter(torch.diag(torch.tensor(self.normalized_positive_definite(M), dtype=self.dtype)))
@@ -124,8 +151,13 @@ class AlmostLinearRNN(ExpertNetwork):
         h = torch.nn.Parameter(torch.zeros(M, dtype=self.dtype))
         return A, W, h
 
+
+
+        
 class ClippedShallowPLRNN(ExpertNetwork):
     """Clipped shallow PLRNN expert architecture."""
+    
+    
     def __init__(self, M, hidden_dim=50, probabilistic=False, dtype=torch.float32):
         super().__init__(M, hidden_dim, probabilistic, dtype=dtype)
         self.A = torch.nn.Parameter(torch.diag(torch.tensor(self.normalized_positive_definite(M), dtype=self.dtype)))
@@ -133,6 +165,8 @@ class ClippedShallowPLRNN(ExpertNetwork):
         self.W2 = torch.nn.Parameter(self.gaussian_init(hidden_dim, M))
         self.h1 = torch.nn.Parameter(torch.zeros(M, dtype=self.dtype))
         self.h2 = torch.nn.Parameter(torch.zeros(hidden_dim, dtype=self.dtype))
+
+
         
     def forward(self, z):
         # z: (M, batch_size)
@@ -146,6 +180,10 @@ class ClippedShallowPLRNN(ExpertNetwork):
             output = self.add_noise(output)
             
         return output
+
+
+
+
 
 class DynaMix(nn.Module):
     def __init__(self, M, N, Experts, P=2, hidden_dim=50, expert_type="almost_linear_rnn", 
@@ -186,6 +224,8 @@ class DynaMix(nn.Module):
         self.hidden_dim = hidden_dim
         self.M = M
 
+
+    
     def step(self, z, context, precomputed_cnn=None, attention_noise=True):
         # z: (M, batch_size)
         # context: (seq_length, batch_size, N)
@@ -203,6 +243,8 @@ class DynaMix(nn.Module):
         # Combine expert outputs
         return torch.sum(torch.stack(results, dim=0), dim=0)
 
+
+        
     def forward(self, z, context, precomputed_cnn=None, attention_noise=True):
         """
         Forward pass through the DynaMix model.
@@ -216,6 +258,8 @@ class DynaMix(nn.Module):
             Updated latent state
         """
         return self.step(z, context, precomputed_cnn=precomputed_cnn, attention_noise=attention_noise)
+
+
         
     def precompute_cnn(self, context):
         """
@@ -232,15 +276,23 @@ class DynaMix(nn.Module):
         encoded = self.gating_network.conv(context_for_conv)
         
         return encoded.permute(2, 0, 1)
+
+
     
     def uniform_init(self, shape, dtype=torch.float32):
         din = shape[-1]
         r = 1 / np.sqrt(din)
         return (torch.rand(shape, dtype=dtype) * 2 - 1) * r
+
+
     
     def gaussian_init(self, M, N):
         return torch.randn(M, N, dtype=self.dtype) * 0.01
 
+
+
+
+        
 def print_model_parameters(model):
     """Print simplified breakdown of model parameters by component."""
     total_params = sum(p.numel() for p in model.parameters())

@@ -1,0 +1,9 @@
+{
+    "file name": "test_data/lorenz63_dysts_vanilla_noise.npy",
+    "forecaster method": "dysts.Lorenz().make_trajectory",
+    "dataset size": 10000,
+    "context length": 2000,
+    "initial cutoff": 0,
+    "start point": "method default",
+    "noisy": true
+}

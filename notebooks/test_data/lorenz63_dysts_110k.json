@@ -1,0 +1,8 @@
+{
+    "file name": "test_data/lorenz63_dysts_110k.npy",
+    "forecaster method": "dysts.Lorenz().make_trajectory",
+    "dataset size": 100000,
+    "context length": 10000,
+    "initial cutoff": 2000,
+    "start point": "[0.63234599 0.6650269  0.04725259]"
+}
