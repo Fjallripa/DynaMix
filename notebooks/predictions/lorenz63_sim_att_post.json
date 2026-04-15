@@ -1,0 +1,8 @@
+{
+    "file name": "predictions/lorenz63_sim_att_post.npz",
+    "forecaster method": "forecast_att_post",
+    "context": "n=2000, from 'test_data/lorenz63_dysts_vanilla'",
+    "dataset size": 2050,
+    "batch size": 100,
+    "force median": true
+}

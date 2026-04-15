@@ -1,5 +1,6 @@
 import torch
 import torch.nn.functional as F
+import numpy as np
 from tqdm import tqdm
 from .preprocessing import DataPreprocessor
 
@@ -654,3 +655,97 @@ class DynaMixForecaster:
         Z = Z.permute(0, 2, 1)   # (T, M, B) -> (T, B, M)
 
         return Z
+
+
+
+    @torch.no_grad()
+    def forecast_compact (self, T, context, start_point=None, raw_noise=None) :
+        """
+        a streamlined version of DynamixForecaster.forecast().
+        Differences:
+        - progress bar via tqdm
+        - reproducability via option to give noise source as input.
+        - much more compact and readable code - most Dynamix methods implemented in this function - whole computation of the prediction loop now visible at a glance.
+        - Only default data preprocssing settings - cuts out lots of fluff in the code.
+    
+        
+        Arguments:
+        T : int, >= 1, T = number of prediction steps
+        context : np.array or torch.Tensor, shape=(Tc, B, N)
+            Tc = context length (in time steps), B = batch size, N = data dimension
+        start_point : None or (np.array or torch.Tensor, shape=(B, N))
+        raw_noise : np.array or torch.Tensor, shape=(T, B, N)
+    
+        Returns:
+        X : np.array or torch.Tensor, shape=(T+1, B, N)
+            T+1 = all prediction steps + start_point
+        """
+    
+        
+        # Data preprocessing
+        ## Load model parameters and make other abbreviations
+        model = self.model
+        M, N = model.M, model.N   # model dimensions: M=30, N=3
+        model_dtype = next(model.parameters()).dtype
+        tensor = lambda array : torch.tensor(array, dtype=model_dtype)
+        isNone = lambda var : type(var) == type(None)
+        preprocess = DataPreprocessor().preprocess
+        GN = model.gating_network
+        attention_temp = torch.abs(GN.softmax_temp1[0])   # float
+        expert_temp = torch.abs(GN.softmax_temp2[0])  # float
+        B = context.shape[1]   # int, batch size
+        E = model.Experts   # = 10
+        
+        ## Extract the individual expert parameters to process them in parallel instead of sequentially.
+        expert_A = torch.zeros((E, M)); expert_W = torch.zeros((E, M, M)); expert_h = torch.zeros((E, M))
+        for e in range(E):
+            expert_A[e] = model.experts[e].A; expert_W[e] = model.experts[e].W; expert_h[e] = model.experts[e].h
+        
+        ## Preprocess context and start_point
+        ctx_std, ctx_mean = context.std(axis=0), context.mean(axis=0)
+        ctx_stdzd = (context - ctx_mean) / ctx_std   # 'context standardized'
+        start = ctx_stdzd[-1]  if isNone(start_point) else  (context - ctx_mean) / ctx_std   # 'start point'
+        context_embedded, initial_condition = preprocess(tensor(ctx_stdzd), N, tensor(start))   # (Tc, B, N), (B, N)
+        precomputed_cnn = model.precompute_cnn(context_embedded)   # (Tc-1, B, N)
+        
+        ## Create output and noise tensors
+        Z = torch.zeros(T+1, B, M)
+        Z[0] = torch.einsum('bn, nm -> bm', initial_condition, model.B)   # (B, M)
+        raw_noise = torch.randn((T, B, N), dtype=model_dtype)  if isNone(raw_noise) else  tensor(raw_noise)
+            # noise source for the attention noise in the Gating Network
+    
+        
+        # Run prediction loop
+        for t in tqdm(range(T)):
+            # ALRNN: Compute individual expert outputs
+            z_relu = Z[t].clone(); F.relu_(z_relu[:, -model.P:])   # (B, M), do a ReLU operation only on the last P feature dim.s of Z[t]
+            expert_outputs = torch.einsum('em, bm -> ebm', expert_A, Z[t]) \
+                + torch.einsum('emi, bi -> ebm', expert_W, z_relu) \
+                + expert_h[:, None]   # (E, B, M)
+            
+            # Gating Network: Compute expert weights
+            ## Add attention noise to current position x
+            x_att = torch.einsum('bm, nm -> bn', Z[t], GN.D)   # (B, N)
+            att_noise = GN.sigma * raw_noise[t]   # (B, N)
+            x_att_noisy = x_att + att_noise   # (B, N)
+            
+            ## CNN: Build weighted embedding of relevant context
+            att_distances = torch.sum(torch.abs(context_embedded[:-1] - x_att_noisy[None]), dim=2)  # (Tc-1, B)
+            attention_weights = F.softmax(- att_distances / attention_temp, dim=0)   # (Tc-1, B)
+            embedding = torch.einsum('cbn, cb -> bn', precomputed_cnn, attention_weights)  # (B, N)
+            
+            ## MLP: Compute expert weights from current z and the embedding
+            combined = torch.cat([embedding, Z[t]], dim=1)   # (B, N+M)
+            mlp_output = GN.mlp_layer2(F.relu(GN.mlp_layer1(combined)))   # (B, E)
+            expert_weights = F.softmax(- mlp_output.T / expert_temp, dim=0)  # (E, B)
+              
+            # Prediction: Combine expert outputs
+            Z[t+1] = torch.einsum('ebm, eb -> bm', expert_outputs, expert_weights)  # (B, M)
+    
+        
+        # Output: Return predicted positions
+        X = Z[:,:, :N]   # (T+1, B, N)
+        if type(context) == np.ndarray:  X = X.detach().cpu().numpy()
+        X = X * ctx_std + ctx_mean   # unstandardize
+        return X
+    

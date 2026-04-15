@@ -1,0 +1,10 @@
+{
+    "file name": "predictions/lorenz63_sim10k_att_noise.npz",
+    "forecaster method": "forecast_posterior",
+    "context": "n=10000, from 'test_data/lorenz63_dysts_110k'",
+    "dataset size": 10000,
+    "batch size": 100,
+    "delta ball size": 0.0,
+    "use prior noise": false,
+    "use attention noise": true
+}

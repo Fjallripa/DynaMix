@@ -17,3 +17,4 @@ statsmodels>=0.14.4
 
 # New ones
 dysts>=0.96
+numba>=0.65.0
