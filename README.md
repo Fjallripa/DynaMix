@@ -1,10 +1,10 @@
-# DynaMix - advanced master practical
+# Finding Uncertainty in DynaMix - advanced master practical
 
 This repository is a fork of [DurstewitzLab/DynaMix-python](https://github.com/DurstewitzLab/DynaMix-python). It represents the output of a 2025/26 advanced master practical at the [Machine Learning Human Behavior](https://humml.iwr.uni-heidelberg.de/) lab as part of my MSc Scientific Computing. The project's aim was to find a reliable way to estimate DynaMix's prediction uncertainty in order to pave the way for active learning approaches with DynaMix.
 
 For this project, see:
-- **[DynaMix project report]()**
-- **[Guide to use the code and reproduce the experiments]()**
+- **[DynaMix project report](DynaMix%20project%20report.pdf)**
+- **[Guide to use the code and reproduce the experiments](experiment%20reproduction%20guide.md)**
 
 The original repository contains the code and datasets necessary to reproduce the experiments of the paper ["True Zero-Shot Inference of Dynamical Systems Preserving Long-Term Statistics"](https://arxiv.org/abs/2505.13192) (Hemmer & Durstewitz, 2025).
 
